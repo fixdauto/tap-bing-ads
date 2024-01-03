@@ -666,7 +666,9 @@ def sync_campaigns(client, account_id, selected_streams): # pylint: disable=inco
 
         if 'campaigns' in selected_streams:
             selected_fields = get_selected_fields(selected_streams['campaigns'])
-            singer.write_schema('campaigns', get_core_schema(client, 'Campaign'), ['Id'])
+            campaign_schema = get_core_schema(client, 'Campaign')
+            del campaign_schema['properties']['BiddingScheme']
+            singer.write_schema('campaigns', campaign_schema, ['Id'])
             with metrics.record_counter('campaigns') as counter:
                 singer.write_records('campaigns',
                                      filter_selected_fields_many(selected_fields, campaigns))
@@ -716,7 +718,13 @@ def sync_ads(client, selected_streams, ad_group_ids):
 
         if 'Ad' in response_dict:
             selected_fields = get_selected_fields(selected_streams['ads'])
-            singer.write_schema('ads', get_core_schema(client, 'Ad'), ['Id'])
+            ads_schema = get_core_schema(client, 'Ad')
+            del ads_schema['properties']['Headlines']
+            del ads_schema['properties']['Images']
+            del ads_schema['properties']['LongHeadline']
+            del ads_schema['properties']['LongHeadlines']
+            del ads_schema['properties']['Videos']
+            singer.write_schema('ads', ads_schema, ['Id'])
             with metrics.record_counter('ads') as counter:
                 ads = response_dict['Ad']
                 singer.write_records('ads', filter_selected_fields_many(selected_fields, ads))
