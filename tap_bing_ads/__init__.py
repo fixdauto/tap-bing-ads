@@ -906,7 +906,10 @@ async def sync_report_interval(client, account_id, report_stream,
     report_name = stringcase.pascalcase(report_stream.stream)
 
     report_schema = get_report_schema(client, report_name)
-    singer.write_schema(report_stream.stream, report_schema, [])
+    if report_name == 'AdPerformanceReport':
+        singer.write_schema(report_stream.stream, report_schema, ['TimePeriod', 'AdId', 'AdType', 'Network', 'AdDistribution', 'DeviceType', 'DeviceOs', 'TopVsOther', 'BidMatchType', 'DeliveredMatchType', 'Language'])
+    elif report_name == 'CampaignPerformanceReport':
+        singer.write_schema(report_stream.stream, report_schema, ['TimePeriod', 'CampaignId', 'Network', 'AdDistribution', 'DeviceType'])
 
     report_time = arrow.get().isoformat()
 
