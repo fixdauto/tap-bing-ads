@@ -765,6 +765,11 @@ def type_report_row(row):
                 value = arrow.get(value).isoformat()
 
         row[field_name] = value
+    
+    # Convert null Goal values to 'All' for use as primary key component
+    # PostgreSQL primary keys cannot contain NULL values
+    if row.get('Goal') is None:
+        row['Goal'] = 'All'
 
 @bing_ads_error_handling
 def generate_poll_report(client, request_id):
@@ -907,7 +912,7 @@ async def sync_report_interval(client, account_id, report_stream,
 
     report_schema = get_report_schema(client, report_name)
     if report_name == 'AdPerformanceReport':
-        singer.write_schema(report_stream.stream, report_schema, ['TimePeriod', 'AdId', 'AdType', 'Network', 'AdDistribution', 'DeviceType', 'DeviceOs', 'TopVsOther', 'BidMatchType', 'DeliveredMatchType', 'Language'])
+        singer.write_schema(report_stream.stream, report_schema, ['TimePeriod', 'AdId', 'AdType', 'Network', 'AdDistribution', 'DeviceType', 'DeviceOs', 'TopVsOther', 'BidMatchType', 'DeliveredMatchType', 'Language', 'Goal'])
     elif report_name == 'CampaignPerformanceReport':
         singer.write_schema(report_stream.stream, report_schema, ['TimePeriod', 'CampaignId', 'Network', 'AdDistribution', 'DeviceType'])
 
