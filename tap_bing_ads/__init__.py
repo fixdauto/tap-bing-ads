@@ -550,6 +550,23 @@ def discover_reports():
                 report_schema,
                 stream_metadata=report_metadata)
             report_streams.append(report_stream_def)
+            # ---- Add an Hourly variant for AdPerformanceReport (day+hour granularity) ----
+            if report_name == 'AdPerformanceReport':
+                hourly_stream_name = 'ad_performance_report_hourly'
+
+                hourly_stream_def = get_stream_def(
+                    hourly_stream_name,
+                    report_schema,
+                    stream_metadata=report_metadata
+                )
+
+                # Write stream-level metadata so sync can override report name + aggregation
+                hourly_mdata = metadata.to_map(hourly_stream_def['metadata'])
+                hourly_mdata = metadata.write(hourly_mdata, (), 'report_name', report_name)
+                hourly_mdata = metadata.write(hourly_mdata, (), 'report_aggregation', 'Hourly')
+                hourly_stream_def['metadata'] = metadata.to_list(hourly_mdata)
+
+                report_streams.append(hourly_stream_def)
 
     return report_streams
 
@@ -586,6 +603,12 @@ def check_for_invalid_selections(prop, mdata, invalid_selections):
                 invalid_selections[prop].append(exclusion[1])
             else:
                 invalid_selections[prop] = [exclusion[1]]
+
+
+def get_stream_setting(catalog_item, key, default=None):
+    mdata = metadata.to_map(catalog_item.metadata)
+    val = metadata.get(mdata, (), key)
+    return default if val is None else val
 
 
 def get_selected_fields(catalog_item, exclude=None):
@@ -762,7 +785,16 @@ def type_report_row(row):
                 else:
                     value = float(value.replace('%', '').replace(',', ''))
             elif _type in ['date', 'datetime']:
-                value = arrow.get(value).isoformat()
+                # Hourly reports use TimePeriod format "yyyy-mm-dd|hour" or "mm/dd/yyyy 12:00:00 AM|hour"
+                if field_name == 'TimePeriod' and '|' in str(value):
+                    date_part, hour_part = value.split('|', 1)
+                    try:
+                        dt = arrow.get(date_part.strip()).replace(hour=int(hour_part.strip()))
+                        value = dt.isoformat()
+                    except (ValueError, TypeError):
+                        value = arrow.get(value).isoformat()
+                else:
+                    value = arrow.get(value).isoformat()
 
         row[field_name] = value
     
@@ -908,7 +940,7 @@ async def sync_report(client, account_id, report_stream):
 async def sync_report_interval(client, account_id, report_stream,
                                start_date, end_date):
     state_key = '{}_{}'.format(account_id, report_stream.stream)
-    report_name = stringcase.pascalcase(report_stream.stream)
+    report_name = get_stream_setting(report_stream, 'report_name') or stringcase.pascalcase(report_stream.stream)
 
     report_schema = get_report_schema(client, report_name)
     if report_name == 'AdPerformanceReport':
@@ -995,7 +1027,11 @@ def build_report_request(client, account_id, report_stream, report_name,
 
     report_request = client.factory.create('{}Request'.format(report_name))
     report_request.Format = 'Csv'
-    report_request.Aggregation = 'Daily'
+    aggregation = get_stream_setting(report_stream, 'report_aggregation', 'Daily')
+    report_request.Aggregation = aggregation
+    # FormatVersion 2.0 gives hourly TimePeriod as "yyyy-mm-dd|hour" (see Microsoft Reporting API docs)
+    if aggregation == 'Hourly':
+        report_request.FormatVersion = '2.0'
     report_request.ExcludeReportHeader = True
     report_request.ExcludeReportFooter = True
 
@@ -1041,8 +1077,13 @@ async def sync_reports(account_id, catalog):
     # Sync report stream
     client = create_sdk_client('ReportingService', account_id)
 
-    reports_to_sync = filter(lambda x: x.is_selected() and x.stream[-6:] == 'report',
-                             catalog.streams)
+    # Include any stream that is a report: ends with '_report' or has report_name (e.g. ad_performance_report_hourly)
+    reports_to_sync = filter(
+        lambda x: x.is_selected() and (
+            x.stream.endswith('_report') or get_stream_setting(x, 'report_name') is not None
+        ),
+        catalog.streams
+    )
 
     sync_report_tasks = [
         sync_report(client, account_id, report_stream)
@@ -1054,9 +1095,10 @@ async def sync_account_data(account_id, catalog, selected_streams):
     all_core_streams = {
         stringcase.snakecase(o) + 's' for o in TOP_LEVEL_CORE_OBJECTS
     }
+    # Report streams include whitelist + hourly (and any other) variants
     all_report_streams = {
         stringcase.snakecase(r) for r in reports.REPORT_WHITELIST
-    }
+    } | {'ad_performance_report_hourly'}
 
     if len(all_core_streams & set(selected_streams)):
         # Sync all core objects streams
